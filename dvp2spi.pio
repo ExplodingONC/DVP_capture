@@ -1,0 +1,67 @@
+.program dvp
+
+.define public PIN_BASE 8
+.define public PIN_COUNT 16
+.define public PIN_FV 21
+.define public PIN_LV 20
+.define public PIN_CLK 22
+
+.wrap_target
+wait_clk_n:
+    wait 0 GPIO PIN_CLK
+check_LV:
+    jmp pin read
+    jmp wait_clk_p
+read:
+    in pins, PIN_COUNT
+wait_clk_p:
+    wait 1 GPIO PIN_CLK
+.wrap
+
+% c-sdk {
+static inline void dvp_program_init(PIO pio, uint sm, float div) {
+    for(uint i=dvp_PIN_BASE; i<dvp_PIN_BASE+dvp_PIN_COUNT; i++) {
+        pio_gpio_init(pio, i);
+    }
+    pio_sm_set_consecutive_pindirs(pio, sm, dvp_PIN_BASE, dvp_PIN_COUNT, false);
+
+    uint offset = pio_add_program(pio, &dvp_program);
+    pio_sm_config c = dvp_program_get_default_config(offset);
+    sm_config_set_in_shift(&c, true, true, 32);
+    sm_config_set_in_pins(&c, dvp_PIN_BASE);
+    sm_config_set_jmp_pin(&c, dvp_PIN_LV);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+
+    sm_config_set_clkdiv(&c, div);
+
+    pio_sm_init(pio, sm, offset, &c);
+}
+%}
+
+
+.program clk
+
+.define public PIN_BASE 28
+.define public PIN_COUNT 1
+
+.wrap_target
+    set pins,1
+    set pins,0
+.wrap
+
+% c-sdk {
+static inline void clk_program_init(PIO pio, uint sm, float div) {
+    for(uint i=clk_PIN_BASE; i<clk_PIN_BASE+clk_PIN_COUNT; i++) {
+        pio_gpio_init(pio, i);
+    }
+    pio_sm_set_consecutive_pindirs(pio, sm, clk_PIN_BASE, clk_PIN_COUNT, true);
+
+    uint offset = pio_add_program(pio, &clk_program);
+    pio_sm_config c = clk_program_get_default_config(offset);
+    sm_config_set_set_pins(&c, clk_PIN_BASE, clk_PIN_COUNT);
+
+    sm_config_set_clkdiv(&c, div);
+
+    pio_sm_init(pio, sm, offset, &c);
+}
+%}
