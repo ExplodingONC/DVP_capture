@@ -22,6 +22,7 @@
     "files.associations": {
         "stdlib.h": "c",
         "pio.h": "c",
-        "bus_ctrl.h": "c"
+        "bus_ctrl.h": "c",
+        "dma.h": "c"
     }
 }

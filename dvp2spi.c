@@ -6,6 +6,7 @@
 
 #include <stdio.h>
 #include "pico/stdlib.h"
+#include "hardware/spi.h"
 #include "hardware/dma.h"
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
@@ -59,26 +60,49 @@ int main()
     stdio_init_all();
     printf("\nI/O initialized.\n");
 
+    // set bus priority to DMA
     bus_ctrl_hw->priority = BUSCTRL_BUS_PRIORITY_DMA_W_BITS | BUSCTRL_BUS_PRIORITY_DMA_R_BITS;
     printf("Bus priority set.\n");
 
+    // allocate PIOs
     const PIO pio_dvp = pio0;
     const uint sm_dvp = 0;
     const uint dma_dvp = 0;
     const PIO pio_clk = pio1;
     const uint sm_clk = 0;
-
+    // init DVP input
     dvp_program_init(pio_dvp, sm_dvp, 1.f);
     dvp_dma_init(pio_dvp, sm_dvp, dma_dvp, count_of(frame_buff) / 2);
     printf("DVP input initialized.\n");
-    // dvp_get_frame(pio_dvp, sm_dvp, dma_chan);
-
+    // init CLK output
     clk_program_init(pio_clk, sm_clk, 1.f);
     printf("CLK output initialized.\n");
     clk_set_active(pio_clk, sm_clk, true);
 
+    // init SPI slave
+    spi_inst_t *spi_slave = spi0;
+    int spi_speed;
+    char command;
+    spi_speed = spi_init(spi_slave, 10000000);
+    printf("SPI initialized at %dHz.\n", spi_speed);
+    spi_set_slave(spi_slave, true);
+    spi_speed = spi_set_baudrate(spi_slave, 10000000);
+    printf("SPI change to slave at %dHz.\n", spi_speed);
+
     while (true)
     {
-        sleep_ms(1); //
+        sleep_ms(1);
+        if (spi_is_readable(spi_slave))
+        {
+            int spi_len;
+            spi_len = spi_read_blocking(spi_slave, 0, &command, 1);
+            printf("SPI command received: %c. Length: %d.\n", command, spi_len);
+            dvp_get_frame(pio_dvp, sm_dvp, dma_dvp);
+            if (spi_is_writable(spi_slave))
+            {
+                spi_len = spi_write16_blocking(spi_slave, frame_buff, sizeof(frame_buff));
+                printf("SPI data sent. Length: %d.\n", spi_len);
+            }
+        }
     }
 }

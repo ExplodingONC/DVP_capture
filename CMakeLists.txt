@@ -17,4 +17,4 @@ pico_enable_stdio_usb(dvp2spi 0)
 pico_enable_stdio_uart(dvp2spi 1)
 pico_add_extra_outputs(dvp2spi)
 
-target_link_libraries(dvp2spi PRIVATE pico_stdlib hardware_dma hardware_pio)
+target_link_libraries(dvp2spi PRIVATE pico_stdlib hardware_dma hardware_pio hardware_spi)
