@@ -16,9 +16,12 @@
 #define kHz 1000
 #define MHz 1000000
 
-// Data will be copied from gpio to buffer
+// Data will be copied from gpio to this buffer via DMA
 uint16_t frame_buff[97 * 2 * 72 * 4];
 
+/**
+ * Associate DVP-PIO to a DMA channel
+ */
 void dvp_dma_init(PIO pio, uint sm, uint dma_chan, size_t dma_length)
 {
     dma_channel_config c = dma_channel_get_default_config(dma_chan);
@@ -34,6 +37,10 @@ void dvp_dma_init(PIO pio, uint sm, uint dma_chan, size_t dma_length)
     );
 }
 
+/**
+ * Start DVP capturing, non-blocking
+ * Query its state with dma_channel_is_busy()
+ */
 void dvp_get_frame(PIO pio, uint sm, uint dma_chan)
 {
     pio_sm_set_enabled(pio, sm, false);
@@ -44,9 +51,11 @@ void dvp_get_frame(PIO pio, uint sm, uint dma_chan)
     pio_sm_set_enabled(pio, sm, true);
 
     dma_channel_set_write_addr(dma_chan, frame_buff, true);
-    dma_channel_wait_for_finish_blocking(dma_chan);
 }
 
+/**
+ * Start/stop timing generator
+ */
 void clk_set_active(PIO pio, uint sm, bool active)
 {
     pio_sm_set_enabled(pio, sm, false);
@@ -55,10 +64,18 @@ void clk_set_active(PIO pio, uint sm, bool active)
     pio_sm_set_enabled(pio, sm, active);
 }
 
+/**
+ * Main
+ */
 int main()
 {
     stdio_init_all();
     printf("\nI/O initialized.\n");
+
+    // init GPIO
+    const uint FV_PIN = dvp_PIN_FV;
+    gpio_init(FV_PIN);
+    gpio_set_dir(FV_PIN, GPIO_IN);
 
     // set bus priority to DMA
     bus_ctrl_hw->priority = BUSCTRL_BUS_PRIORITY_DMA_W_BITS | BUSCTRL_BUS_PRIORITY_DMA_R_BITS;
@@ -87,22 +104,48 @@ int main()
     printf("SPI initialized at %dHz.\n", spi_speed);
     spi_set_slave(spi_slave, true);
     spi_speed = spi_set_baudrate(spi_slave, 10000000);
+    spi_set_format(spi_slave, 8, 0, 0, SPI_MSB_FIRST);
     printf("SPI change to slave at %dHz.\n", spi_speed);
+    gpio_set_function(6, GPIO_FUNC_SPI);
+    gpio_set_function(9, GPIO_FUNC_SPI);
+    gpio_set_function(8, GPIO_FUNC_SPI);
+    gpio_set_function(7, GPIO_FUNC_SPI);
+    printf("SPI allocated to pin 6(MOSI), 9(MISO), 8(CLK), 7(SS).\n");
 
     while (true)
     {
-        sleep_ms(1);
         if (spi_is_readable(spi_slave))
         {
+            // read SPI instruction
             int spi_len;
             spi_len = spi_read_blocking(spi_slave, 0, &command, 1);
-            printf("SPI command received: %c. Length: %d.\n", command, spi_len);
-            dvp_get_frame(pio_dvp, sm_dvp, dma_dvp);
-            if (spi_is_writable(spi_slave))
+            printf("SPI command received: 0x%02x. Length: %d.\n", command, spi_len);
+            // get a frame
+            while (gpio_get(FV_PIN))
             {
-                spi_len = spi_write16_blocking(spi_slave, frame_buff, sizeof(frame_buff));
-                printf("SPI data sent. Length: %d.\n", spi_len);
+                // FV remains high though the whole frame (F1-F4)
+                // discard on-going frame and wait for a fresh one
+                // meanwhile fail the query
+                if (spi_is_readable(spi_slave)) spi_read_blocking(spi_slave, 0, &command, 1);
             }
+            dvp_get_frame(pio_dvp, sm_dvp, dma_dvp);
+            while (dma_channel_is_busy(dma_dvp))
+            {
+                // fail the query
+                if (spi_is_readable(spi_slave)) spi_read_blocking(spi_slave, 0, &command, 1);
+            }
+            printf("Frame data acquired.\n");
+            // accept the query
+            spi_len = spi_read_blocking(spi_slave, 1, &command, 1);
+            printf("Transfer confirmed.\n");
+            // send result back
+            spi_len = spi_write_blocking(spi_slave, (uint8_t*)frame_buff, 2*sizeof(frame_buff));
+            printf("SPI data sent. Length: %d.\n", spi_len);
+        }
+        else
+        {
+            // nothing to do
+            sleep_ms(1);
         }
     }
 }
