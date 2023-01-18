@@ -20,9 +20,11 @@
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
     "C_Cpp.errorSquiggles": "Enabled",
     "files.associations": {
+        "*.m": "matlab",
         "stdlib.h": "c",
         "pio.h": "c",
         "bus_ctrl.h": "c",
-        "dma.h": "c"
+        "dma.h": "c",
+        "custom_lidar.h": "c"
     }
 }
