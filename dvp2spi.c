@@ -5,6 +5,8 @@
  */
 
 #include <stdio.h>
+#include <stdbool.h>
+#include "boards/custom_lidar.h"
 #include "pico/stdlib.h"
 #include "hardware/spi.h"
 #include "hardware/dma.h"
@@ -17,7 +19,10 @@
 #define MHz 1000000
 
 // Data will be copied from gpio to this buffer via DMA
-uint16_t frame_buff[4][72][194] = {};
+#define res_X 96
+#define res_Y 72
+#define subframe_cnt 4
+uint16_t frame_buff[subframe_cnt][res_Y][2 * res_X + 2] = {};
 
 /**
  * Associate DVP-PIO to a DMA channel
@@ -136,17 +141,17 @@ int main()
                 // meanwhile fail the query
                 if (spi_is_readable(spi_slave))
                 {
-                    spi_read_blocking(spi_slave, 0, &command, 1);
+                    spi_read_blocking(spi_slave, false, &command, 1);
                     printf("SPI query refused: 0x%02x.\n", command);
                 }
             }
             dvp_get_frame(pio_dvp, sm_dvp, dma_dvp);
-            while (dma_channel_is_busy(dma_dvp))
+            while (gpio_get(FV_PIN) || dma_channel_is_busy(dma_dvp))
             {
                 // fail the query
                 if (spi_is_readable(spi_slave))
                 {
-                    spi_read_blocking(spi_slave, 0, &command, 1);
+                    spi_read_blocking(spi_slave, false, &command, 1);
                     printf("SPI query refused: 0x%02x.\n", command);
                 }
             }
@@ -154,11 +159,11 @@ int main()
             printf("Frame data acquired. Size is %d.\n", sizeof(frame_buff));
 
             // temp test
-            uint16_t* temp_p = &frame_buff[0][0][0];
-            printf("temp: %d.\n", temp_p[0]);
-            for (size_t i = 0; i < 255; i++)
+            uint16_t *temp_p = &frame_buff[0][0][0];
+            printf("temp: %4X %4X.\n", temp_p[0], temp_p[1]);
+            for (size_t i = 0; i < 1024; i++)
             {
-                temp_p[i] = (uint16_t)i & 0x00FF;
+                temp_p[i] = (uint16_t)i & 0xFFFF;
             }
 
             printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[0][0][0], frame_buff[0][0][1], frame_buff[0][0][2], frame_buff[0][0][3]);
@@ -166,10 +171,17 @@ int main()
             printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[2][0][0], frame_buff[2][0][1], frame_buff[2][0][2], frame_buff[2][0][3]);
             printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[3][0][0], frame_buff[3][0][1], frame_buff[3][0][2], frame_buff[3][0][3]);
             // accept the query
-            spi_len = spi_read_blocking(spi_slave, 1, &command, 1);
-            printf("Transfer confirmed.\n");
-            // send result back
-            spi_len = spi_write_blocking(spi_slave, (uint8_t *)frame_buff, 2 * sizeof(frame_buff));
+            spi_len = spi_read_blocking(spi_slave, true, &command, 1);
+            printf("Transfer confirmed with 0x%X.\n", command);
+            // send result back (line-by-line to avoid instability)
+            spi_len = 0;
+            for (size_t frame = 0; frame < subframe_cnt; frame++)
+            {
+                for (size_t row = 0; row < res_Y; row++)
+                {
+                    spi_len += spi_write_blocking(spi_slave, (uint8_t *)frame_buff[frame][row], 2 * (2 * res_X + 2));
+                }
+            }
             printf("SPI data sent. Length: %d.\n", spi_len);
         }
         else
