@@ -19,10 +19,10 @@
 #define MHz 1000000
 
 // Data will be copied from gpio to this buffer via DMA
-#define res_X 96
-#define res_Y 72
-#define subframe_cnt 4
-uint16_t frame_buff[subframe_cnt][res_Y][2 * res_X + 2] = {};
+#define res_X 104
+#define res_Y 80
+#define N_data 2
+uint16_t frame_buff[N_data][res_Y][2 * res_X + 2] = {};
 
 /**
  * Associate DVP-PIO to a DMA channel
@@ -53,9 +53,10 @@ void dvp_get_frame(PIO pio, uint sm, uint dma_chan)
     // partial ISR contents left over from a previous run. sm_restart does this.
     pio_sm_clear_fifos(pio, sm);
     pio_sm_restart(pio, sm);
-    pio_sm_set_enabled(pio, sm, true);
 
     dma_channel_set_write_addr(dma_chan, frame_buff, true);
+    pio_sm_exec(pio, sm, pio_encode_wait_gpio(1, dvp_PIN_FV));
+    pio_sm_set_enabled(pio, sm, true);
 }
 
 /**
@@ -64,17 +65,6 @@ void dvp_get_frame(PIO pio, uint sm, uint dma_chan)
 void dvp_stop_frame(PIO pio, uint sm)
 {
     pio_sm_set_enabled(pio, sm, false);
-}
-
-/**
- * Start/stop timing generator
- */
-void clk_set_active(PIO pio, uint sm, bool active)
-{
-    pio_sm_set_enabled(pio, sm, false);
-    pio_sm_clear_fifos(pio, sm);
-    pio_sm_restart(pio, sm);
-    pio_sm_set_enabled(pio, sm, active);
 }
 
 /**
@@ -98,96 +88,35 @@ int main()
     const PIO pio_dvp = pio0;
     const uint sm_dvp = 0;
     const uint dma_dvp = 0;
-    const PIO pio_clk = pio1;
-    const uint sm_clk = 0;
     // init DVP input
     dvp_program_init(pio_dvp, sm_dvp, 1.f);
     dvp_dma_init(pio_dvp, sm_dvp, dma_dvp, count_of(frame_buff) / 2);
     printf("DVP input initialized.\n");
-    // init CLK output
-    clk_program_init(pio_clk, sm_clk, 1.f);
-    printf("CLK output initialized.\n");
-    clk_set_active(pio_clk, sm_clk, true);
-
-    // init SPI slave
-    spi_inst_t *spi_slave = spi0;
-    int spi_speed;
-    int spi_len;
-    char command;
-    spi_speed = spi_init(spi_slave, 1 * MHz);
-    printf("SPI initialized at %dHz.\n", spi_speed);
-    spi_set_slave(spi_slave, true);
-    spi_speed = spi_set_baudrate(spi_slave, 1 * MHz);
-    spi_set_format(spi_slave, 8, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
-    printf("SPI change to slave at %dHz.\n", spi_speed);
-    gpio_set_function(4, GPIO_FUNC_SPI);
-    gpio_set_function(7, GPIO_FUNC_SPI);
-    gpio_set_function(6, GPIO_FUNC_SPI);
-    gpio_set_function(5, GPIO_FUNC_SPI);
-    printf("SPI allocated to pin 4(MOSI), 7(MISO), 6(CLK), 5(SS).\n");
 
     while (true)
     {
-        if (spi_is_readable(spi_slave))
-        {
-            // read SPI instruction
-            spi_len = spi_read_blocking(spi_slave, 0, &command, 1);
-            printf("SPI command received: 0x%02x. Length: %d.\n", command, spi_len);
             // get a frame
-            while (gpio_get(FV_PIN))
-            {
-                // FV remains high though the whole frame (F1-F4)
-                // discard on-going frame and wait for a fresh one
-                // meanwhile fail the query
-                if (spi_is_readable(spi_slave))
-                {
-                    spi_read_blocking(spi_slave, false, &command, 1);
-                    printf("SPI query refused: 0x%02x.\n", command);
-                }
-            }
+            while (gpio_get(FV_PIN));
+            printf("last frame\n");
+
             dvp_get_frame(pio_dvp, sm_dvp, dma_dvp);
-            while (gpio_get(FV_PIN) || dma_channel_is_busy(dma_dvp))
-            {
-                // fail the query
-                if (spi_is_readable(spi_slave))
-                {
-                    spi_read_blocking(spi_slave, false, &command, 1);
-                    printf("SPI query refused: 0x%02x.\n", command);
-                }
-            }
+
+            while (!gpio_get(FV_PIN));
+            printf("frame gap\n");
+
+            while (gpio_get(FV_PIN) || dma_channel_is_busy(dma_dvp));
+            printf("current frame\n");
+
             dvp_stop_frame(pio_dvp, sm_dvp);
             printf("Frame data acquired. Size is %d.\n", sizeof(frame_buff));
 
             // temp test
-            uint16_t *temp_p = &frame_buff[0][0][0];
-            printf("temp: %4X %4X.\n", temp_p[0], temp_p[1]);
-            for (size_t i = 0; i < 1024; i++)
-            {
-                temp_p[i] = (uint16_t)i & 0xFFFF;
-            }
-
-            printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[0][0][0], frame_buff[0][0][1], frame_buff[0][0][2], frame_buff[0][0][3]);
+            printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[0][0][0], frame_buff[0][0][1], frame_buff[0][0][10], frame_buff[0][0][11]);
+            printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[0][1][0], frame_buff[0][1][1], frame_buff[0][1][2], frame_buff[0][1][3]);
             printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[1][0][0], frame_buff[1][0][1], frame_buff[1][0][2], frame_buff[1][0][3]);
-            printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[2][0][0], frame_buff[2][0][1], frame_buff[2][0][2], frame_buff[2][0][3]);
-            printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[3][0][0], frame_buff[3][0][1], frame_buff[3][0][2], frame_buff[3][0][3]);
-            // accept the query
-            spi_len = spi_read_blocking(spi_slave, true, &command, 1);
-            printf("Transfer confirmed with 0x%X.\n", command);
-            // send result back (line-by-line to avoid instability)
-            spi_len = 0;
-            for (size_t frame = 0; frame < subframe_cnt; frame++)
-            {
-                for (size_t row = 0; row < res_Y; row++)
-                {
-                    spi_len += spi_write_blocking(spi_slave, (uint8_t *)frame_buff[frame][row], 2 * (2 * res_X + 2));
-                }
-            }
-            printf("SPI data sent. Length: %d.\n", spi_len);
-        }
-        else
-        {
-            // nothing to do
-            sleep_ms(1);
-        }
+            printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[1][1][0], frame_buff[1][1][1], frame_buff[1][1][2], frame_buff[1][1][3]);
+            
+            sleep_ms(2000);
+        
     }
 }
