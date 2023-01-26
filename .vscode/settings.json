@@ -18,7 +18,8 @@
     },
     "cmake.buildBeforeRun": true,
     "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
-    "C_Cpp.errorSquiggles": "Enabled",
+    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.configurationWarnings": "disabled",
     "files.associations": {
         "*.m": "matlab",
         "stdlib.h": "c",
