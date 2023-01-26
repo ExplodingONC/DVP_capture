@@ -95,28 +95,28 @@ int main()
 
     while (true)
     {
-            // get a frame
-            while (gpio_get(FV_PIN));
-            printf("last frame\n");
+        // get a frame
+        while (gpio_get(FV_PIN));
+        printf("last frame\n");
 
-            dvp_get_frame(pio_dvp, sm_dvp, dma_dvp);
+        dvp_get_frame(pio_dvp, sm_dvp, dma_dvp);
 
-            while (!gpio_get(FV_PIN));
-            printf("frame gap\n");
+        while (!gpio_get(FV_PIN));
+        printf("frame gap\n");
 
-            while (gpio_get(FV_PIN) || dma_channel_is_busy(dma_dvp));
-            printf("current frame\n");
+        while (gpio_get(FV_PIN) || dma_channel_is_busy(dma_dvp));
+        printf("current frame\n");
 
-            dvp_stop_frame(pio_dvp, sm_dvp);
-            printf("Frame data acquired. Size is %d.\n", sizeof(frame_buff));
+        dvp_stop_frame(pio_dvp, sm_dvp);
+        printf("Frame data acquired. Size is %d.\n", sizeof(frame_buff));
 
-            // temp test
-            printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[0][0][0], frame_buff[0][0][1], frame_buff[0][0][10], frame_buff[0][0][11]);
-            printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[0][1][0], frame_buff[0][1][1], frame_buff[0][1][2], frame_buff[0][1][3]);
-            printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[1][0][0], frame_buff[1][0][1], frame_buff[1][0][2], frame_buff[1][0][3]);
-            printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[1][1][0], frame_buff[1][1][1], frame_buff[1][1][2], frame_buff[1][1][3]);
-            
-            sleep_ms(2000);
+        // temp test
+        printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[0][0][0], frame_buff[0][0][1], frame_buff[0][0][10], frame_buff[0][0][11]);
+        printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[0][1][0], frame_buff[0][1][1], frame_buff[0][1][2], frame_buff[0][1][3]);
+        printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[1][0][0], frame_buff[1][0][1], frame_buff[1][0][2], frame_buff[1][0][3]);
+        printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[1][1][0], frame_buff[1][1][1], frame_buff[1][1][2], frame_buff[1][1][3]);
+        
+        sleep_ms(2000);
         
     }
 }
