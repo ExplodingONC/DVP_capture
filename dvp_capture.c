@@ -45,7 +45,7 @@ void dvp_dma_init(PIO pio, uint sm, uint dma_chan, size_t dma_length)
  * Start DVP capturing, non-blocking
  * Query its state with dma_channel_is_busy()
  */
-void dvp_get_frame(PIO pio, uint sm, uint dma_chan)
+void dvp_arm_frame(PIO pio, uint sm, uint dma_chan)
 {
     pio_sm_set_enabled(pio, sm, false);
     // Need to clear _input shift counter_, as well as FIFO, because there may be
@@ -99,7 +99,7 @@ int main()
         // discard on-going frame
         while (gpio_get(FV_PIN));
         // frame capture - arm
-        dvp_get_frame(pio_dvp, sm_dvp, dma_dvp);
+        dvp_arm_frame(pio_dvp, sm_dvp, dma_dvp);
         // wait for new frame start
         while (!gpio_get(FV_PIN));
         // wait for new frame end

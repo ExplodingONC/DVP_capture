@@ -46,7 +46,7 @@ void dvp_dma_init(PIO pio, uint sm, uint dma_chan, size_t dma_length)
  * Start DVP capturing, non-blocking
  * Query its state with dma_channel_is_busy()
  */
-void dvp_get_frame(PIO pio, uint sm, uint dma_chan)
+void dvp_arm_frame(PIO pio, uint sm, uint dma_chan)
 {
     pio_sm_set_enabled(pio, sm, false);
     // Need to clear _input shift counter_, as well as FIFO, because there may be
@@ -68,17 +68,56 @@ void dvp_stop_frame(PIO pio, uint sm)
 }
 
 /**
+ *
+ */
+uint32_t dvp_get_frame(PIO pio_dvp, uint sm_dvp, uint dma_dvp, uint FV_PIN)
+{
+    // discard on-going frame
+    while (gpio_get(FV_PIN))
+        ;
+    // frame capture - arm
+    dvp_arm_frame(pio_dvp, sm_dvp, dma_dvp);
+    // wait for new frame start
+    while (!gpio_get(FV_PIN))
+        ;
+    // wait for new frame end
+    while (gpio_get(FV_PIN) || dma_channel_is_busy(dma_dvp))
+        ;
+    // frame capture - terminate
+    dvp_stop_frame(pio_dvp, sm_dvp);
+    // check frame size by reading DMA transfer count
+    return dma_channel_hw_addr(dma_dvp)->transfer_count;
+}
+
+/**
  * Main
  */
 int main()
 {
     stdio_init_all();
     printf("\nI/O initialized.\n");
+    printf("Buffer size: %d bytes or %d pixels.\n", sizeof(frame_buff), sizeof(frame_buff) / sizeof(uint16_t));
 
     // init GPIO
     const uint FV_PIN = dvp_PIN_FV;
     gpio_init(FV_PIN);
     gpio_set_dir(FV_PIN, GPIO_IN);
+
+    // init SPI slave
+    spi_inst_t *spi_slave = spi0;
+    int spi_speed;
+    int spi_len;
+    char command, ack;
+    spi_speed = spi_init(spi_slave, 1 * MHz);
+    spi_set_slave(spi_slave, true);
+    spi_speed = spi_set_baudrate(spi_slave, 1 * MHz);
+    spi_set_format(spi_slave, 8, SPI_CPOL_1, SPI_CPHA_1, SPI_MSB_FIRST);
+    printf("SPI initialized to slave at %dHz.\n", spi_speed);
+    gpio_set_function(4, GPIO_FUNC_SPI);
+    gpio_set_function(7, GPIO_FUNC_SPI);
+    gpio_set_function(6, GPIO_FUNC_SPI);
+    gpio_set_function(5, GPIO_FUNC_SPI);
+    printf("SPI allocated to pin 4(MOSI), 7(MISO), 6(CLK), 5(SS).\n");
 
     // set bus priority to DMA
     bus_ctrl_hw->priority = BUSCTRL_BUS_PRIORITY_DMA_W_BITS | BUSCTRL_BUS_PRIORITY_DMA_R_BITS;
@@ -89,34 +128,54 @@ int main()
     const uint sm_dvp = 0;
     const uint dma_dvp = 0;
     // init DVP input
+    uint dma_trans_count = sizeof(frame_buff) / sizeof(uint16_t) / 2;
     dvp_program_init(pio_dvp, sm_dvp, 1.f);
-    dvp_dma_init(pio_dvp, sm_dvp, dma_dvp, count_of(frame_buff) / 2);
+    dvp_dma_init(pio_dvp, sm_dvp, dma_dvp, dma_trans_count);
     printf("DVP input initialized.\n");
 
     while (true)
     {
-        // get a frame
-        while (gpio_get(FV_PIN));
-        printf("last frame\n");
+        // check if there is SPI communication
+        if (!spi_is_readable(spi_slave))
+        {
+            // nothing to do, skip
+            continue;
+        }
+        else
+        {
+            // get SPI command
+            spi_read_blocking(spi_slave, 0x10, &command, 1);
+            if (command == 0x00)
+                continue;
+        }
 
-        dvp_get_frame(pio_dvp, sm_dvp, dma_dvp);
+        // check which subframe the command wants
+        char subframe = command & 0x0f;
+        printf("Subframe F%1d required.\n", subframe);
 
-        while (!gpio_get(FV_PIN));
-        printf("frame gap\n");
+        // get designated subframe
+        do
+        {
+            dvp_get_frame(pio_dvp, sm_dvp, dma_dvp, FV_PIN);
+        } while (subframe != (((frame_buff[0][0][0] & 0x0300) >> 8) + 1));
+        printf("Subframe F%1d fetched.\n", subframe);
 
-        while (gpio_get(FV_PIN) || dma_channel_is_busy(dma_dvp));
-        printf("current frame\n");
+        // alert master about ready subframe
+        ack = 0x10 | subframe;
+        spi_write_blocking(spi_slave, &ack, 1);
+        printf("Subframe F%1d ready.\n", subframe);
 
-        dvp_stop_frame(pio_dvp, sm_dvp);
-        printf("Frame data acquired. Size is %d.\n", sizeof(frame_buff));
+        spi_len = 0;
+        for (size_t integr = 0; integr < N_data; integr++)
+        {
+            for (size_t row = 0; row < res_Y; row++)
+            {
+                spi_len += spi_write_blocking(spi_slave, (uint8_t *)frame_buff[integr][row], 2 * (2 * res_X + 2));
+            }
+        }
+        printf("Subframe F%1d sent. Length: %d bytes.\n", subframe, spi_len);
 
-        // temp test
-        printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[0][0][0], frame_buff[0][0][1], frame_buff[0][0][10], frame_buff[0][0][11]);
-        printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[0][1][0], frame_buff[0][1][1], frame_buff[0][1][2], frame_buff[0][1][3]);
-        printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[1][0][0], frame_buff[1][0][1], frame_buff[1][0][2], frame_buff[1][0][3]);
-        printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[1][1][0], frame_buff[1][1][1], frame_buff[1][1][2], frame_buff[1][1][3]);
-        
-        sleep_ms(2000);
-        
+        // zzz
+        sleep_ms(1000);
     }
 }
