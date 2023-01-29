@@ -176,6 +176,6 @@ int main()
         printf("Subframe F%1d sent. Length: %d bytes.\n", subframe, spi_len);
 
         // zzz
-        sleep_ms(1000);
+        //sleep_ms(1000);
     }
 }
