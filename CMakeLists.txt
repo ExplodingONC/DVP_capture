@@ -12,6 +12,7 @@ pico_generate_pio_header(dvp2spi ${CMAKE_CURRENT_LIST_DIR}/dvp2spi.pio OUTPUT_DI
 target_sources(dvp2spi PRIVATE dvp2spi.c)
 pico_enable_stdio_usb(dvp2spi 0)
 pico_enable_stdio_uart(dvp2spi 1)
+pico_set_binary_type(dvp2spi default)
 pico_add_extra_outputs(dvp2spi)
 target_link_libraries(dvp2spi PRIVATE pico_stdlib hardware_dma hardware_pio hardware_spi)
 
@@ -22,5 +23,6 @@ pico_generate_pio_header(dvp_capture ${CMAKE_CURRENT_LIST_DIR}/dvp2spi.pio OUTPU
 target_sources(dvp_capture PRIVATE dvp_capture.c)
 pico_enable_stdio_usb(dvp_capture 0)
 pico_enable_stdio_uart(dvp_capture 1)
+pico_set_binary_type(dvp_capture default)
 pico_add_extra_outputs(dvp_capture)
 target_link_libraries(dvp_capture PRIVATE pico_stdlib hardware_dma hardware_pio)
