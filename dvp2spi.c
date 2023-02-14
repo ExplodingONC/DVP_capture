@@ -95,7 +95,8 @@ uint32_t dvp_get_frame(PIO pio_dvp, uint sm_dvp, uint dma_dvp, uint FV_PIN)
 int main()
 {
     stdio_init_all();
-    printf("\nI/O initialized.\n");
+    printf("\nBuild version 20230214-2155\n");
+    printf("I/O initialized.\n");
     printf("Buffer size: %d bytes or %d pixels.\n", sizeof(frame_buff), sizeof(frame_buff) / sizeof(uint16_t));
 
     // init GPIO
