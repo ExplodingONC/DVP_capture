@@ -8,6 +8,7 @@
 #include <stdbool.h>
 #include "boards/custom_lidar.h"
 #include "pico/stdlib.h"
+#include "pico/multicore.h"
 #include "hardware/dma.h"
 #include "hardware/pio.h"
 #include "hardware/clocks.h"
@@ -22,6 +23,25 @@
 #define res_Y 80
 #define N_data 2
 uint16_t subframe_buff[N_data][res_Y][2 * res_X + 2] = {};
+uint16_t frame_buff[4][res_Y][2 * res_X + 2] = {};
+
+/**
+ * extract subframe data into frame buff
+ */
+int data_process()
+{
+    int subframe = (subframe_buff[0][0][0] & 0x0300) >> 8;
+    for (int y = 0; y < res_Y; y++)
+    {
+        frame_buff[subframe][y][0] = subframe_buff[0][y][0];
+        frame_buff[subframe][y][1] = subframe_buff[0][y][1];
+        for (int x = 2; x < 2 * res_X + 2; x++)
+        {
+            frame_buff[subframe][y][x] = subframe_buff[1][y][x] - subframe_buff[0][y][x];
+        }
+    }
+    return subframe;
+}
 
 /**
  * Associate DVP-PIO to a DMA channel
@@ -67,23 +87,14 @@ void dvp_stop_frame(PIO pio, uint sm)
 }
 
 /**
- * Main
+ * core 1 main code
  */
-int main()
+void core1_main(void)
 {
-    stdio_init_all();
-    printf("\nI/O initialized.\n");
-    printf("Buffer size: %d bytes or %d pixels.\n", sizeof(subframe_buff), sizeof(subframe_buff)/sizeof(uint16_t));
-
     // init GPIO
     const uint FV_PIN = dvp_PIN_FV;
     gpio_init(FV_PIN);
     gpio_set_dir(FV_PIN, GPIO_IN);
-
-    // set bus priority to DMA
-    bus_ctrl_hw->priority = BUSCTRL_BUS_PRIORITY_DMA_W_BITS | BUSCTRL_BUS_PRIORITY_DMA_R_BITS;
-    printf("Bus priority set.\n");
-
     // allocate PIOs
     const PIO pio_dvp = pio0;
     const uint sm_dvp = 0;
@@ -94,31 +105,59 @@ int main()
     dvp_dma_init(pio_dvp, sm_dvp, dma_dvp, dma_trans_count);
     printf("DVP input initialized.\n");
 
-    while (true)
+    while (1)
     {
-        // discard on-going frame
-        while (gpio_get(FV_PIN));
+        multicore_fifo_pop_blocking();
         // frame capture - arm
         dvp_arm_frame(pio_dvp, sm_dvp, dma_dvp);
+        // process last subframe
+        int last_subframe = data_process();
+        multicore_fifo_push_timeout_us(last_subframe, 10);
         // wait for new frame start
-        while (!gpio_get(FV_PIN));
+        while (!gpio_get(FV_PIN))
+            ;
         // wait for new frame end
-        while (gpio_get(FV_PIN) || dma_channel_is_busy(dma_dvp));
+        while (gpio_get(FV_PIN) || dma_channel_is_busy(dma_dvp))
+            ;
         // frame capture - terminate
         dvp_stop_frame(pio_dvp, sm_dvp);
-        // check frame size by reading DMA transfer count
-        if (dma_channel_hw_addr(dma_dvp)->transfer_count == 0)
-            printf("Frame data acquired. Size is %d bytes.\n", sizeof(subframe_buff));
-        else
-            printf("Frame incomplete! Remaining %d words.\n", dma_channel_hw_addr(dma_dvp)->transfer_count);
+    }
+}
 
-        // print key datas (data headers + pixel samples)
-        printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", subframe_buff[0][0][0], subframe_buff[0][0][1], subframe_buff[0][0][2], subframe_buff[0][0][3]);
-        printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", subframe_buff[0][1][0], subframe_buff[0][1][1], subframe_buff[0][1][2], subframe_buff[0][1][3]);
-        printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", subframe_buff[1][0][0], subframe_buff[1][0][1], subframe_buff[1][0][2], subframe_buff[1][0][3]);
-        printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", subframe_buff[1][1][0], subframe_buff[1][1][1], subframe_buff[1][1][2], subframe_buff[1][1][3]);
-        // zzz
-        sleep_ms(1000);
-        
+/**
+ * Main
+ */
+int main()
+{
+    stdio_init_all();
+    printf("\nI/O initialized.\n");
+    printf("Buffer size: %d bytes or %d pixels.\n", sizeof(subframe_buff), sizeof(subframe_buff) / sizeof(uint16_t));
+
+    // set bus priority to DMA
+    bus_ctrl_hw->priority = BUSCTRL_BUS_PRIORITY_DMA_W_BITS | BUSCTRL_BUS_PRIORITY_DMA_R_BITS;
+    printf("Bus priority set.\n");
+
+    // start core 1
+    multicore_launch_core1(core1_main);
+    sleep_ms(10);
+    multicore_fifo_push_blocking(0);  // first run
+
+    int count = 0;
+    while (true)
+    {
+        int subframe = multicore_fifo_pop_blocking();
+        multicore_fifo_push_blocking(0);  // continue
+        if (count++ > 49)
+        {
+            printf("Subframe: %d\n", subframe);
+            // print key datas (data headers + pixel samples)
+            printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[0][0][0], frame_buff[0][0][1], frame_buff[0][0][2], frame_buff[0][0][3]);
+            printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[1][0][0], frame_buff[1][0][1], frame_buff[1][0][2], frame_buff[1][0][3]);
+            printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[2][0][0], frame_buff[2][0][1], frame_buff[2][0][2], frame_buff[2][0][3]);
+            printf("0x%04x 0x%04x 0x%04x 0x%04x.\n", frame_buff[3][0][0], frame_buff[3][0][1], frame_buff[3][0][2], frame_buff[3][0][3]);
+            // zzz
+            count = 0;
+            printf("\n");
+        }
     }
 }

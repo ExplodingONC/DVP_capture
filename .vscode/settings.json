@@ -26,6 +26,7 @@
         "pio.h": "c",
         "bus_ctrl.h": "c",
         "dma.h": "c",
-        "custom_lidar.h": "c"
+        "custom_lidar.h": "c",
+        "clocks.h": "c"
     }
 }
