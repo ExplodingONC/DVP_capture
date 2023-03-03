@@ -37,7 +37,7 @@ int data_process()
         frame_buff[subframe][y][1] = subframe_buff[0][y][1];
         for (int x = 2; x < 2 * res_X + 2; x++)
         {
-            frame_buff[subframe][y][x] = subframe_buff[1][y][x] - subframe_buff[0][y][x];
+            frame_buff[subframe][y][x] = subframe_buff[N_data-1][y][x] - subframe_buff[0][y][x];
         }
     }
     return subframe;

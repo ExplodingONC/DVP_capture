@@ -38,7 +38,7 @@ int data_process()
         frame_buff[subframe][y][1] = subframe_buff[0][y][1];
         for (int x = 2; x < 2 * res_X + 2; x++)
         {
-            frame_buff[subframe][y][x] = subframe_buff[1][y][x] - subframe_buff[0][y][x];
+            frame_buff[subframe][y][x] = subframe_buff[N_data-1][y][x] - subframe_buff[0][y][x];
         }
     }
     return subframe;
@@ -131,7 +131,7 @@ void core1_main(void)
 int main()
 {
     stdio_init_all();
-    printf("\nBuild version 20230303-1708\n");
+    printf("\nBuild version 20230303-1730\n");
     printf("I/O initialized.\n");
     printf("Subframe size: %d bytes or %d pixels.\n", sizeof(subframe_buff), sizeof(subframe_buff) / sizeof(uint16_t));
     printf("Fullframe size: %d bytes or %d pixels.\n", sizeof(frame_buff), sizeof(frame_buff) / sizeof(uint16_t));
